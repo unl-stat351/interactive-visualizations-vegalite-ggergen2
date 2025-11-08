@@ -1,0 +1,199 @@
+---
+title: "Homework: Interactive Visualization with Vega-Lite"
+author: "Your Name"
+format: html
+theme: cosmo
+---
+
+# Introduction
+
+In this assignment, you will create interactive charts using **Vega-Lite** inside a **Quarto document** with ObservableJS chunks.
+Complete all sections and provide brief explanations for each chart.
+
+```{ojs}
+// This sets up observable JS
+import {vl} from "@observablehq/vega-lite"
+```
+
+## Setting Up
+
+For this lab, we'll use the XKCD Color survey data.
+The TidyTuesday documentation is available [here](https://github.com/rfordatascience/tidytuesday/blob/main/data/2025/2025-07-08/readme.md).
+
+Observable does best with data that's local, so we'll read the CSVs into R objects and write them out to local CSVs (yes, we could just download them... but this gives you the chance to do an exploratory data analysis in R if you prefer.)
+
+```{r}
+answers <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/main/data/2025/2025-07-08/answers.csv')
+color_ranks <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/main/data/2025/2025-07-08/color_ranks.csv')
+users <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/main/data/2025/2025-07-08/users.csv')
+
+write.csv(answers, "data/answers.csv")
+write.csv(color_ranks, "data/color_ranks.csv")
+write.csv(users, "data/users.csv")
+```
+
+```{ojs}
+// Imports
+d3 = require("d3@7")
+import {Inputs} from "@observablehq/inputs"
+
+// Load color_ranks.csv (preferred) or sample fallback
+raw = await FileAttachment("data/color_ranks.csv").csv({typed: false});
+
+// Parse hex -> RGB/HSL
+colors = raw.map(d => {
+  const hex = d.hex?.trim();
+  const name = d.color ?? d.name ?? d.Color ?? "unknown";
+  const c = d3.color(hex);
+  const hsl = d3.hsl(c);
+  return {
+    color: name,
+    hex,
+    rank: +d.rank,
+    r: c?.r ?? NaN,
+    g: c?.g ?? NaN,
+    b: c?.b ?? NaN,
+    h: ((hsl?.h ?? NaN) + 360) % 360,
+    s: (hsl?.s ?? NaN) * 100,
+    l: (hsl?.l ?? NaN) * 100
+  }
+}).filter(d => d.hex && !Number.isNaN(d.h) && !Number.isNaN(d.l))
+
+
+// Parse hex -> RGB/HSL and compute a hue family bucket
+allColors = raw.map(d => {
+  const hex = d.hex?.trim();
+  const name = d.color ?? d.name ?? d.Color ?? "unknown";
+  const c = d3.color(hex);
+  const hsl = d3.hsl(c);
+  const h = ((hsl?.h ?? NaN) + 360) % 360;
+  const s = (hsl?.s ?? NaN) * 100;
+  const l = (hsl?.l ?? NaN) * 100;
+  const family = (s < 10 || l > 95) ? "Grays/Whites" :
+    (h < 15 || h >= 345) ? "Reds" :
+    (h < 45) ? "Oranges" :
+    (h < 70) ? "Yellows" :
+    (h < 170) ? "Greens" :
+    (h < 200) ? "Cyans" :
+    (h < 255) ? "Blues" :
+    (h < 290) ? "Purples" :
+    (h < 330) ? "Pinks" : "Reds";
+  return {color: name, hex, rank: +d.rank, r: c?.r ?? NaN, g: c?.g ?? NaN, b: c?.b ?? NaN, h, s, l, family}
+}).filter(d => d.hex)
+```
+
+# Interactive Exploration
+
+I asked CoPilot to generate an observable plot that uses selectors to change the color space and saturation.
+I've modified its code to both fix errors and explain more things using comments. 
+
+It may help to bring up Wikipedia pages for [RGB](https://en.wikipedia.org/wiki/RGB_color_model) and [HSL](https://en.wikipedia.org/wiki/HSL_and_HSV) color models. 
+
+```{ojs}
+// selector for color space -- changes plot axes
+viewof space = Inputs.select(["HSL", "RGB"], {label: "Color space (axes)", value: "HSL"})
+// selector for color saturation/intensity
+viewof minSat = Inputs.range([0, 100], {label: "Min saturation (%)", value: 0, step: 1})
+
+
+// filter out points based on saturation
+filtered = colors.filter(d => d.s >= minSat)
+
+// Create an x variable that's conditional on what is selected,
+// changing both the values and the label accordingly
+xAccessor = space === "HSL" ? (d) => d.h : (d) => d.r
+xLabel = space === "HSL" ? "Hue (°)" : "Red (0–255)"
+
+// Create a y variable that's conditional on what is selected,
+// changing both the values and the label accordingly
+yAccessor = space === "HSL" ? (d) => d.l : (d) => d.g
+yLabel = space === "HSL" ? "Lightness (%)" : "Green (0–255)"
+```
+
+```{ojs}
+Plot.plot({
+  grid: true, // show coordinate grid
+  color: {legend: false}, // no need for legends when the data is colors
+  marks: [
+    Plot.dot(
+      filtered, // use filtered data
+      {
+        x: xAccessor, y: yAccessor, // specify mappings
+        fill: (d) => d.hex,
+        stroke: "#333", strokeWidth: 0.5, r: 5, // and defaults
+        tip: true,
+        // title = tooltip text. use both color name and hex value
+        title: d => `${d.color} (${d.hex})
+  HSL: ${d.h.toFixed(0)}, ${d.s.toFixed(0)}%, ${d.l.toFixed(0)}%
+  RGB: ${d.r}, ${d.g}, ${d.b}`
+      }
+    )],
+  x: {label: xLabel, domain: space === "HSL" ? [0, 360] : [0, 255]},
+  y: {label: yLabel, domain: space === "HSL" ? [0, 100] : [0, 255]},
+  caption: space === "HSL" ? "Hue vs. Lightness (filtered by min saturation)." : "Red vs. Green (still filtered by HSL saturation)."
+})
+```
+
+## Alternatives
+
+Can you think of a better way to display this data, potentially using similar selectors? Describe the changes you'd make. 
+
+> 
+
+Is your proposed graphic supported by vega-lite? Why or why not? (You can provide links to documentation/stackOverflow)
+
+> 
+
+
+## Adding selectors
+
+Add a `maxSat2` selector that puts an upper bound on the saturation. 
+To ensure mathematical viability, your `maxSat2` selector should have a lower bound of `minSat2`.
+Wire your `maxSat2` selector to the plot, using the chunk below, which I've edited to use variables with `2` at the end to not conflict with the original chart. 
+
+
+```{ojs}
+// selector for color space -- changes plot axes
+viewof space2 = Inputs.select(["HSL", "RGB"], {label: "Color space (axes)", value: "HSL"})
+// selector for color saturation/intensity
+viewof minSat2 = Inputs.range([0, 100], {label: "Min saturation (%)", value: 0, step: 1})
+
+
+// filter out points based on saturation
+filtered2 = colors.filter(d => d.s >= minSat2)
+
+// Create an x variable that's conditional on what is selected,
+// changing both the values and the label accordingly
+xAccessor2 = space === "HSL" ? (d) => d.h : (d) => d.r
+xLabel2 = space === "HSL" ? "Hue (°)" : "Red (0–255)"
+
+// Create a y variable that's conditional on what is selected,
+// changing both the values and the label accordingly
+yAccessor2 = space === "HSL" ? (d) => d.l : (d) => d.g
+yLabel2 = space === "HSL" ? "Lightness (%)" : "Green (0–255)"
+```
+
+```{ojs}
+Plot.plot({
+  grid: true, // show coordinate grid
+  color: {legend: false}, // no need for legends when the data is colors
+  marks: [
+    Plot.dot(
+      filtered2, // use filtered data
+      {
+        x: xAccessor2, y: yAccessor2, // specify mappings
+        fill: (d) => d.hex,
+        stroke: "#333", strokeWidth: 0.5, r: 5, // and defaults
+        tip: true,
+        // title = tooltip text. use both color name and hex value
+        title: d => `${d.color} (${d.hex})
+  HSL: ${d.h.toFixed(0)}, ${d.s.toFixed(0)}%, ${d.l.toFixed(0)}%
+  RGB: ${d.r}, ${d.g}, ${d.b}`
+      }
+    )],
+  x: {label: xLabel2, domain: space === "HSL" ? [0, 360] : [0, 255]},
+  y: {label: yLabel2, domain: space === "HSL" ? [0, 100] : [0, 255]},
+  caption: space === "HSL" ? "Hue vs. Lightness (filtered by min saturation)." : "Red vs. Green (still filtered by HSL saturation)."
+})
+```
+
